@@ -1,18 +1,14 @@
-# Migrations — the centrepiece
+# Migrations
 
-This is what we care about most. Put your schema migration here — any tool (Alembic, Flyway,
-sqitch, golang-migrate) or plain SQL is fine.
+Evolves the baseline `orders` table (`../schema.sql`) with an expand/backfill/contract
+rollout of a `currency` column. See the top-level `README.md` ("Database migration —
+safety reasoning") for the full write-up: why each step is safe under live traffic,
+and how a mid-run failure is detected and recovered without restoring from a backup.
 
-**The task:** evolve the baseline `orders` table (see `../schema.sql`) with a change that is
-**safe under live traffic**. For example: move `status` into its own lookup/table, or add a
-`currency` column with a backfill. Demonstrate:
-
-- **Expand/contract** — the change is backwards-compatible: the old and new versions of the app
-  both work *during* the rollout, so you never need a big-bang cutover.
-- **Reversible** — there's a down path.
-- **Mid-run failure** — if the migration half-applies in production, how do you **detect what
-  actually ran** (history/version table, schema inspection) and **recover forward**? "Restore
-  from a backup" is not the answer we're after.
-
-Your CI pipeline (`.github/workflows/ci.yml`) should run this migration against the ephemeral
-Postgres. Explain the safety reasoning in the top-level README, and be ready to defend it live.
+- `run_migrations.py` — applies/reverts versioned SQL files in `sql/`, tracked in a
+  `schema_migrations` table (`up [target]`, `down <version>`, `status`).
+- `backfill_currency.py` — batched, idempotent backfill of historical rows.
+- `sql/0001_add_currency_column.{up,down}.sql` — expand.
+- `sql/0002_make_currency_not_null.{up,down}.sql` — contract.
+- `tests/test_migrations.py` — proves the reversibility and crash-resume properties
+  end-to-end against a real Postgres.

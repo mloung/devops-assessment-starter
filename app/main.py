@@ -17,6 +17,7 @@ app = FastAPI(title="Orders API")
 class Order(BaseModel):
     amount: float
     status: str = "pending"
+    currency: str = "ZAR"
 
 
 def _conn():
@@ -36,16 +37,16 @@ def health():
 @app.get("/orders")
 def list_orders():
     with _conn() as conn:
-        rows = conn.execute("SELECT id, amount, status FROM orders ORDER BY id").fetchall()
-    return [{"id": r[0], "amount": float(r[1]), "status": r[2]} for r in rows]
+        rows = conn.execute("SELECT id, amount, status, currency FROM orders ORDER BY id").fetchall()
+    return [{"id": r[0], "amount": float(r[1]), "status": r[2], "currency": r[3]} for r in rows]
 
 
 @app.post("/orders")
 def create_order(order: Order):
     with _conn() as conn:
         row = conn.execute(
-            "INSERT INTO orders (amount, status) VALUES (%s, %s) RETURNING id",
-            (order.amount, order.status),
+            "INSERT INTO orders (amount, status, currency) VALUES (%s, %s, %s) RETURNING id",
+            (order.amount, order.status, order.currency),
         ).fetchone()
         conn.commit()
-    return {"id": row[0], "amount": order.amount, "status": order.status}
+    return {"id": row[0], "amount": order.amount, "status": order.status, "currency": order.currency}

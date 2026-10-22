@@ -19,6 +19,49 @@ docker compose up        # brings up Postgres (and your app, once added)
 ```
 The API needs `DB_URL` (default `postgresql://app:app@localhost:5432/app`).
 
+## Database migration — safety reasoning
+
+The baseline `orders` table gets one change: a `currency` column, rolled out as
+**expand → backfill → contract** (`migrations/sql/0001_*`, `migrations/backfill_currency.py`,
+`migrations/sql/0002_*`). CI (`.github/workflows/ci.yml`) and local dev (`docker-compose.yml`'s
+`migrate` service) both run the same three steps against their own Postgres.
+
+**Expand (`0001`) is backwards-compatible.** `currency` is added as a *nullable* column —
+no default, no constraint. The old app code (which never mentions `currency`) keeps working
+unmodified; the new app code (`app/main.py`, `Order.currency: str = "ZAR"`) also works, since
+old-shaped requests without a `currency` field simply default to `"ZAR"`. Both versions of the
+app can run side by side during the rollout — there's no cutover moment.
+
+**The backfill is safe under live traffic because it's batched and idempotent.**
+`backfill_currency.py` updates existing rows `LIMIT 500` (`FOR UPDATE SKIP LOCKED`) at a time,
+each batch its own transaction, so it never holds a long lock on the table. It always targets
+`WHERE currency IS NULL`, so progress lives entirely in the data — running it again after a
+crash just continues from wherever it stopped. There is no separate progress-tracking state to
+get out of sync.
+
+**Contract (`0002`) only happens once the backfill has actually finished**, and even then
+without a blocking table rewrite: it adds `CHECK (currency IS NOT NULL) NOT VALID` (instant —
+only blocks *new* violations) and then runs `VALIDATE CONSTRAINT`, which scans existing rows
+under a `SHARE UPDATE EXCLUSIVE` lock rather than the much heavier lock a plain
+`ALTER COLUMN ... SET NOT NULL` would need. If you run `0002` before the backfill is done, it
+fails loudly (a row violates the check) instead of silently corrupting the rollout — that's the
+correct failure mode.
+
+**Mid-run failure: detect what actually ran, then recover forward — never restore from backup.**
+- *Schema changes:* `python migrations/run_migrations.py status` reads the `schema_migrations`
+  table, the single source of truth for which versions actually committed. Each version's SQL
+  and its `schema_migrations` row change happen in one transaction, so a crash mid-file can
+  never leave a version marked "applied" that only half-ran.
+- *The backfill:* progress is just `SELECT count(*) FROM orders WHERE currency IS NULL` —
+  if a crash happens mid-backfill, re-running `backfill_currency.py` (no flags) continues from
+  there and finishes. `migrations/tests/test_migrations.py` proves this by simulating a crash
+  (`--max-batches 1`) and then resuming to completion.
+
+**Reversible.** Every migration has a down file: `python migrations/run_migrations.py down
+<version>` drops the constraint (`0002`) or the column (`0001`) — both cheap, instant DDL
+operations with no data-loss risk, since nothing downstream depends on `currency` yet by the
+time you'd choose to roll back.
+
 ---
 
 # Case Study: DevOps / Platform Engineer

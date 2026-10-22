@@ -1,0 +1,2 @@
+ALTER TABLE orders ALTER COLUMN currency DROP DEFAULT;
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_currency_not_null;

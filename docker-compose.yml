@@ -18,6 +18,28 @@ services:
       timeout: 3s
       retries: 10
 
+  # One-off: applies the expand/backfill/contract migration before `app`
+  # starts, so local dev ends up on the same fully-migrated schema as CI.
+  # Uses the plain base image + pip install (rather than building from our
+  # app Dockerfile, which deliberately excludes migrations/ to keep the
+  # production image lean) -- a real pipeline would build a small dedicated
+  # migration image in CI instead of installing deps on every `up`.
+  migrate:
+    image: python:3.12-slim
+    working_dir: /migrations
+    volumes:
+      - ./migrations:/migrations:ro
+    environment:
+      DB_URL: postgresql://app:app@db:5432/app
+    command: >
+      sh -c "pip install --no-cache-dir 'psycopg[binary]==3.2.1' &&
+             python run_migrations.py up 0001_add_currency_column &&
+             python backfill_currency.py &&
+             python run_migrations.py up 0002_make_currency_not_null"
+    depends_on:
+      db:
+        condition: service_healthy
+
   app:
     build:
       context: .
@@ -29,3 +51,5 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully

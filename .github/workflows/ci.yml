@@ -1,6 +1,5 @@
-# Skeleton CI pipeline — fill in the steps.
 # On push, GitHub runs this on free runners (no cloud account needed). The `postgres`
-# service below is your ephemeral migration target — this CI run is the "deploy".
+# service below is the ephemeral migration target — this CI run is the "deploy".
 name: ci
 
 on: [push]
@@ -43,8 +42,17 @@ jobs:
       - name: Load baseline schema
         run: psql "$DB_URL" -f schema.sql
 
-      - name: Run database migrations
-        run: python migrations/run_migrations.py
+      - name: Expand — add currency column (0001)
+        run: python migrations/run_migrations.py up 0001_add_currency_column
+
+      - name: Backfill currency (idempotent, batched)
+        run: python migrations/backfill_currency.py
+
+      - name: Contract — enforce currency NOT NULL (0002)
+        run: python migrations/run_migrations.py up 0002_make_currency_not_null
+
+      - name: Migration status
+        run: python migrations/run_migrations.py status
 
       - name: Run tests
         run: pytest app/tests -v
@@ -62,3 +70,6 @@ jobs:
           curl -sf http://localhost:8000/health
           docker logs app-smoke
           docker stop app-smoke
+
+      - name: Migration safety tests (reversibility + resumable backfill)
+        run: pytest migrations/tests -v
