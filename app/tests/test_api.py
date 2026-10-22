@@ -28,3 +28,15 @@ def test_create_order_without_currency_defaults_to_zar():
     created = client.post("/orders", json={"amount": 10.0, "status": "pending"})
     assert created.status_code == 200
     assert created.json()["currency"] == "ZAR"
+
+
+def test_response_includes_request_id_header():
+    resp = client.get("/health")
+    assert "x-request-id" in resp.headers
+
+
+def test_metrics_endpoint_exposes_prometheus_data():
+    client.get("/health")
+    resp = client.get("/metrics")
+    assert resp.status_code == 200
+    assert b"http_requests_total" in resp.content

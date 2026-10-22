@@ -1,0 +1,18 @@
+# Example Prometheus alerting rule for the orders API. Not wired to a running
+# Alertmanager in this case study (no cloud account) -- this documents the
+# concrete alert referenced in README.md's "Observability" section.
+groups:
+  - name: orders-api
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total[5m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Orders API error rate > 5% for 5m"
+          description: "More than 5% of requests are returning 5xx. Check DB connectivity and recent deploys/migrations."

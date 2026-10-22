@@ -10,8 +10,11 @@ import psycopg
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from observability import instrument, logger
+
 DB_URL = os.environ.get("DB_URL", "postgresql://app:app@localhost:5432/app")
 app = FastAPI(title="Orders API")
+instrument(app)
 
 
 class Order(BaseModel):
@@ -31,6 +34,7 @@ def health():
             conn.execute("SELECT 1")
         return {"status": "ok"}
     except Exception as exc:  # noqa: BLE001
+        logger.warning("db_unavailable", extra={"fields": {"error": str(exc)}})
         raise HTTPException(status_code=503, detail=f"db unavailable: {exc}")
 
 

@@ -62,6 +62,45 @@ correct failure mode.
 operations with no data-loss risk, since nothing downstream depends on `currency` yet by the
 time you'd choose to roll back.
 
+## Observability
+
+`app/observability.py` wires up all three pillars, kept out of `app/main.py` so the business
+logic stays focused:
+
+- **Structured logs.** Every log line is a single JSON object on stdout (`timestamp`, `level`,
+  `message`, plus `request_id` and `trace_id`), via a custom `logging.Formatter` + `Filter`. A
+  request-scoped `request_id` is generated per request (also echoed back as `X-Request-ID`), and
+  `trace_id` is pulled from the active OpenTelemetry span, so a log line and its trace always
+  correlate — grep one, find the other. The one deliberate failure path in the app (`/health`
+  when the DB is down) logs a structured `db_unavailable` warning before returning 503.
+- **Metrics.** `GET /metrics` exposes Prometheus text format: `http_requests_total` (counter,
+  labelled `method`/`path`/`status`) and `http_request_duration_seconds` (histogram, same
+  labels). That's enough to derive request rate, error rate, and latency distribution.
+- **Traces (bonus).** OpenTelemetry auto-instruments FastAPI and `psycopg`, so every request
+  gets a span with a nested DB-query span, printed as JSON via a `ConsoleSpanExporter` — no
+  collector needed for this demo. This cost ~4 extra dependencies in `app/requirements.txt`, a
+  deliberate tradeoff against the "lean image" goal from the containerisation task, made because
+  the trace→log correlation is worth it for debugging a real incident.
+
+**The alert I'd set:** sustained HTTP 5xx rate above 5% over a 5-minute window
+(`observability/alerts.yml`, a concrete — if unwired, since there's no cloud here — Prometheus
+rule). It's actionable (DB down, a bad deploy, or a migration that broke the app all show up this
+way) and it means something is actually broken for users right now, not just "an error happened
+once."
+
+**The alert I would *not* set:** raw 4xx counts, or latency percentiles, as a standalone trigger.
+4xx naturally includes expected, non-actionable noise — we've already seen `GET /` and
+`GET /favicon.ico` return 404 in completely normal `docker compose` operation (browsers probing
+for a favicon, nothing wrong with the service) — and on this service's low, bursty traffic a p99
+latency alert would mostly fire on sample-size noise rather than a real regression. Either one
+as a page would train whoever's on call to ignore the pager.
+
+**Mapping to Azure:** structured stdout logs → Azure Monitor Log Analytics (via the Container
+Apps/AKS log driver); `/metrics` → Azure Monitor managed Prometheus (or App Insights custom
+metrics) scraping the same endpoint; traces → swap the `ConsoleSpanExporter` for an OTLP exporter
+pointed at Application Insights' distributed tracing, with `request_id`/`trace_id` carrying
+straight through so logs and traces still correlate in Log Analytics.
+
 ---
 
 # Case Study: DevOps / Platform Engineer
