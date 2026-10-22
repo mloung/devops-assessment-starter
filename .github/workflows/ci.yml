@@ -27,8 +27,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # TODO (you):
-      # - Build the Docker image.
-      # - Run your tests.
-      # - Run your migration against the postgres service (DB_URL above).
-      # - Bonus: show the expand/contract rollout and/or the mid-run-failure handling.
+      - name: Build app image
+        run: docker build -t orders-api:${{ github.sha }} .
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install app + test dependencies
+        run: pip install -r app/requirements.txt -r requirements-test.txt
+
+      - name: Install postgresql-client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Load baseline schema
+        run: psql "$DB_URL" -f schema.sql
+
+      - name: Run database migrations
+        run: python migrations/run_migrations.py
+
+      - name: Run tests
+        run: pytest app/tests -v
+
+      - name: Smoke-test the built container
+        run: |
+          docker run -d --network host --name app-smoke -e DB_URL="$DB_URL" orders-api:${{ github.sha }}
+          for i in $(seq 1 15); do
+            if curl -sf http://localhost:8000/health; then
+              echo "app is healthy"
+              break
+            fi
+            sleep 2
+          done
+          curl -sf http://localhost:8000/health
+          docker logs app-smoke
+          docker stop app-smoke
