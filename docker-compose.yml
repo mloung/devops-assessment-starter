@@ -18,7 +18,14 @@ services:
       timeout: 3s
       retries: 10
 
-  # TODO (you): add your containerised `app` service here.
-  #   - build from your Dockerfile
-  #   - set DB_URL to point at the `db` service (host: db)
-  #   - wait for db to be healthy (depends_on condition: service_healthy)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DB_URL: postgresql://app:app@db:5432/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy

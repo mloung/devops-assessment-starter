@@ -1,0 +1,9 @@
+.git
+.github
+migrations
+README.md
+docker-compose.yml
+__pycache__/
+*.pyc
+.venv/
+.env
